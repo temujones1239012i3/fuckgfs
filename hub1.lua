@@ -5,6 +5,26 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 
 
+--// ===========================
+--// AUTO START ALL MODULES
+--// ===========================
+task.defer(function()
+    repeat task.wait() until ScriptModules  -- wait until ScriptModules is loaded
+    for name, module in pairs(ScriptModules) do
+        if type(module) == "table" and type(module.init) == "function" then
+            local ok, err = pcall(function()
+                module:init()
+            end)
+            if ok then
+                module.active = true
+                print("[Vster Hub] ✅ Auto-started:", module.name or name)
+            else
+                warn("[Vster Hub] ⚠️ Failed to start module:", name, err)
+            end
+        end
+    end
+end)
+
 -- =======================
 -- SETTINGS PERSISTENCE - INSTANT LOAD (DELTA/VOLCANO)
 -- =======================
