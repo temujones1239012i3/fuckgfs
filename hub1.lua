@@ -850,13 +850,19 @@ ScriptModules["GrappleSpeed"] = {
     end
 }
 
+--// ===========================
+--// ANTI-HIT (DESYNC) FIXED WITH GUI TOGGLE
+--// ===========================
 ScriptModules["AntiHit"] = {
     name = "Anti-Hit (Desync)",
     category = "Combat",
-    active = true,
+    active = false,
     data = {},
-    
+
     init = function(self)
+        if self.active then return end
+        self.active = true
+
         local player = game.Players.LocalPlayer
         local RunService = game:GetService("RunService")
         local UserInputService = game:GetService("UserInputService")
@@ -874,9 +880,8 @@ ScriptModules["AntiHit"] = {
         self.data.lastUpdate = tick()
         self.data.OFFSET_RANGE = 4
         self.data.DEBOUNCE = false
-        self.data.serverPosBox = nil
 
-        -- Godmode
+        -- Godmode (maintain health)
         self.data.humanoid.MaxHealth = math.huge
         self.data.humanoid.Health = math.huge
         table.insert(self.data.connections, self.data.humanoid:GetPropertyChangedSignal("Health"):Connect(function()
@@ -885,13 +890,13 @@ ScriptModules["AntiHit"] = {
             end
         end))
 
-        -- Setup collision groups
+        -- Collision group setup
         pcall(function()
             PhysicsService:RegisterCollisionGroup("NoCollide")
             PhysicsService:CollisionGroupSetCollidable("NoCollide", "Default", false)
         end)
 
-        -- Internal helper: equip Quantum Cloner if not already
+        -- Equip Quantum Cloner
         local function equipQuantumCloner()
             for _, item in pairs(self.data.character:GetChildren()) do
                 if item:IsA("Tool") and item.Name == "Quantum Cloner" then
@@ -930,7 +935,6 @@ ScriptModules["AntiHit"] = {
             end)
         end
 
-        -- Ownership handling
         local function setClientOwnership()
             for _, part in pairs(self.data.character:GetDescendants()) do
                 if part:IsA("BasePart") then
@@ -952,7 +956,6 @@ ScriptModules["AntiHit"] = {
             end)
         end
 
-        -- Initialize desync
         local function initializeDesync()
             if self.data.humanoidRootPart then
                 self.data.FAKE_POSITION = self.data.humanoidRootPart.CFrame
@@ -962,7 +965,6 @@ ScriptModules["AntiHit"] = {
             end
         end
 
-        -- Toggle desync
         local function toggleDesync()
             self.data.DESYNC_ENABLED = not self.data.DESYNC_ENABLED
             if self.data.DESYNC_ENABLED then
@@ -980,14 +982,12 @@ ScriptModules["AntiHit"] = {
             end
         end
 
-        -- Fire Quantum Cloner teleport
         local function fireQuantumTeleport()
             local Event = game:GetService("ReplicatedStorage").Packages.Net["RE/QuantumCloner/OnTeleport"]
             Event:FireServer()
             print("[Anti-Hit] Fired QuantumCloner teleport event.")
         end
 
-        -- Main execution sequence (when pressing F)
         local function executeDesyncSequence()
             if self.data.DEBOUNCE then return end
             self.data.DEBOUNCE = true
@@ -997,7 +997,6 @@ ScriptModules["AntiHit"] = {
                 return
             end
 
-            -- Fire use item
             local UseItemEvent = game:GetService("ReplicatedStorage").Packages.Net["RE/UseItem"]
             UseItemEvent:FireServer()
             task.wait(0.3)
@@ -1011,11 +1010,39 @@ ScriptModules["AntiHit"] = {
             self.data.DEBOUNCE = false
         end
 
+        -- GUI indicator
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "VsterDesyncStatus"
+        gui.ResetOnSpawn = false
+        gui.Parent = player:WaitForChild("PlayerGui")
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0, 160, 0, 35)
+        label.Position = UDim2.new(0.5, -80, 0.8, 0)
+        label.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        label.TextColor3 = Color3.fromRGB(255, 50, 50)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 18
+        label.Text = "Desync: OFF"
+        label.Parent = gui
+        Instance.new("UICorner", label).CornerRadius = UDim.new(0, 8)
+
+        local function updateGUI()
+            if self.data.DESYNC_ENABLED then
+                label.Text = "Desync: ON"
+                label.TextColor3 = Color3.fromRGB(50, 255, 100)
+            else
+                label.Text = "Desync: OFF"
+                label.TextColor3 = Color3.fromRGB(255, 50, 50)
+            end
+        end
+
         -- F keybind
-        table.insert(self.data.connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
-            if gameProcessed or not self.active then return end
+        table.insert(self.data.connections, UserInputService.InputBegan:Connect(function(input, gpe)
+            if gpe or not self.active then return end
             if input.KeyCode == Enum.KeyCode.F then
                 executeDesyncSequence()
+                updateGUI()
             end
         end))
 
@@ -1033,12 +1060,24 @@ ScriptModules["AntiHit"] = {
                 self.data.lastUpdate = tick()
             end
         end))
+
+        self.cleanup = function()
+            for _, c in ipairs(self.data.connections) do
+                pcall(function() c:Disconnect() end)
+            end
+            if gui then gui:Destroy() end
+            applyFFlags(false)
+            setClientOwnership()
+            self.active = false
+        end
+
+        print("[Vster Hub] ✓ Anti-Hit (Desync) ready — Press F to activate")
     end
 }
 
 
 --// ===========================
---// ADMIN PANEL (MISC MODULE)
+--// ADMIN PANEL (PLAYER EFFECTS GUI)
 --// ===========================
 ScriptModules["AdminPanel"] = {
     name = "Admin Panel",
@@ -1046,127 +1085,139 @@ ScriptModules["AdminPanel"] = {
     active = true,
 
     init = function(self)
-        if self.active then return end
+        if self.initialized then return end
+        self.initialized = true
         self.active = true
 
-        -- Create the ScreenGui
-        local player = game:GetService("Players").LocalPlayer
-        local screenGui = Instance.new("ScreenGui")
-        screenGui.Name = "VsterAdminPanel"
-        screenGui.ResetOnSpawn = false
-        screenGui.IgnoreGuiInset = true
-        screenGui.Parent = player:WaitForChild("PlayerGui")
+        local Players = game:GetService("Players")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local LocalPlayer = Players.LocalPlayer
 
-        -- Create the main frame
-        local frame = Instance.new("Frame")
-        frame.Size = UDim2.new(0, 400, 0, 260)
-        frame.Position = UDim2.new(0.5, -200, 0.5, -130)
-        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        frame.BorderSizePixel = 0
-        frame.Active = true
-        frame.Draggable = true
-        frame.Parent = screenGui
+        -- Remote used to execute commands
+        local Remote = ReplicatedStorage
+            :WaitForChild("Packages")
+            :WaitForChild("Net")
+            :WaitForChild("RE/AdminPanelService/ExecuteCommand")
 
-        -- UI corner + shadow
-        local uicorner = Instance.new("UICorner")
-        uicorner.CornerRadius = UDim.new(0, 10)
-        uicorner.Parent = frame
+        -- List of available commands
+        local commands = {
+            "ragdoll", "rocket", "balloon", "inverse", "nightvision",
+            "jail", "tiny", "jumpscare", "morph"
+        }
 
-        -- Title bar
-        local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, 0, 0, 30)
-        title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-        title.Text = "Vster Admin Panel"
-        title.TextColor3 = Color3.fromRGB(255, 255, 255)
-        title.Font = Enum.Font.GothamBold
-        title.TextSize = 16
-        title.Parent = frame
+        -- Create ScreenGui
+        local ScreenGui = Instance.new("ScreenGui")
+        ScreenGui.Name = "PlayerEffectPanel"
+        ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-        local titleCorner = Instance.new("UICorner")
-        titleCorner.CornerRadius = UDim.new(0, 10)
-        titleCorner.Parent = title
+        -- Main frame
+        local Frame = Instance.new("Frame")
+        Frame.Size = UDim2.new(0, 280, 0, 375)
+        Frame.Position = UDim2.new(1, -290, 0.5, -187.5)
+        Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        Frame.BorderSizePixel = 0
+        Frame.Active = true
+        Frame.Draggable = true
+        Frame.Parent = ScreenGui
 
-        -- Scrolling area for players
-        local scroll = Instance.new("ScrollingFrame")
-        scroll.Size = UDim2.new(1, -20, 1, -90)
-        scroll.Position = UDim2.new(0, 10, 0, 40)
-        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-        scroll.BackgroundTransparency = 1
-        scroll.ScrollBarThickness = 6
-        scroll.Parent = frame
+        local Title = Instance.new("TextLabel")
+        Title.Size = UDim2.new(1, 0, 0, 40)
+        Title.Text = "VSTER ADMIN"
+        Title.TextColor3 = Color3.fromRGB(235, 225, 255)
+        Title.BackgroundTransparency = 1
+        Title.Font = Enum.Font.GothamBold
+        Title.TextSize = 22
+        Title.Parent = Frame
 
-        local layout = Instance.new("UIListLayout")
-        layout.Padding = UDim.new(0, 5)
-        layout.Parent = scroll
+        -- Scrolling frame for players
+        local Scrolling = Instance.new("ScrollingFrame")
+        Scrolling.Size = UDim2.new(1, 0, 1, -50)
+        Scrolling.Position = UDim2.new(0, 0, 0, 45)
+        Scrolling.CanvasSize = UDim2.new(0, 0, 0, 0)
+        Scrolling.ScrollBarThickness = 6
+        Scrolling.BackgroundTransparency = 1
+        Scrolling.Parent = Frame
 
-        -- Function: Refresh player list
-        local function refreshPlayers()
-            scroll:ClearAllChildren()
-            layout.Parent = scroll
-            for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
-                local btn = Instance.new("TextButton")
-                btn.Size = UDim2.new(1, 0, 0, 28)
-                btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-                btn.Text = plr.Name
-                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-                btn.Font = Enum.Font.Gotham
-                btn.TextSize = 14
-                btn.Parent = scroll
+        local UIListLayout = Instance.new("UIListLayout")
+        UIListLayout.Padding = UDim.new(0, 6)
+        UIListLayout.Parent = Scrolling
 
-                local corner = Instance.new("UICorner")
-                corner.CornerRadius = UDim.new(0, 6)
-                corner.Parent = btn
+        -- Function to create buttons for players
+        local function createPlayerButton(player)
+            local PlayerFrame = Instance.new("Frame")
+            PlayerFrame.Size = UDim2.new(1, -10, 0, 35)
+            PlayerFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+            PlayerFrame.BorderSizePixel = 0
+            PlayerFrame.Parent = Scrolling
 
-                btn.MouseButton1Click:Connect(function()
-                    setclipboard(plr.UserId)
-                    game.StarterGui:SetCore("SendNotification", {
-                        Title = "Copied!",
-                        Text = "Copied " .. plr.Name .. "'s UserId",
-                        Duration = 2
-                    })
-                end)
-            end
-            scroll.CanvasSize = UDim2.new(0, 0, 0, #game:GetService("Players"):GetPlayers() * 33)
+            local NameLabel = Instance.new("TextLabel")
+            NameLabel.Text = player.Name
+            NameLabel.Size = UDim2.new(0.6, 0, 1, 0)
+            NameLabel.Position = UDim2.new(0.05, 0, 0, 0)
+            NameLabel.BackgroundTransparency = 1
+            NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            NameLabel.Font = Enum.Font.Gotham
+            NameLabel.TextSize = 18
+            NameLabel.TextXAlignment = Enum.TextXAlignment.Left
+            NameLabel.Parent = PlayerFrame
+
+            local Button = Instance.new("TextButton")
+            Button.Text = "Execute"
+            Button.Size = UDim2.new(0.4, 0, 0.8, 0)
+            Button.Position = UDim2.new(0.55, 0, 0.1, 0)
+            Button.BackgroundColor3 = Color3.fromRGB(60, 130, 255)
+            Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            Button.Font = Enum.Font.GothamBold
+            Button.TextSize = 16
+            Button.AutoButtonColor = true
+            Button.Parent = PlayerFrame
+
+            Button.MouseButton1Click:Connect(function()
+                for _, command in ipairs(commands) do
+                    local args = { player, command }
+                    Remote:FireServer(unpack(args))
+                    task.wait(0.15)
+                end
+            end)
         end
 
-        refreshPlayers()
-        game:GetService("Players").PlayerAdded:Connect(refreshPlayers)
-        game:GetService("Players").PlayerRemoving:Connect(refreshPlayers)
+        -- Populate GUI with current players
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                createPlayerButton(player)
+            end
+        end
 
-        -- Remote Executor Button
-        local execBtn = Instance.new("TextButton")
-        execBtn.Size = UDim2.new(1, -20, 0, 30)
-        execBtn.Position = UDim2.new(0, 10, 1, -40)
-        execBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-        execBtn.Text = "Run Remote Executor"
-        execBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        execBtn.Font = Enum.Font.GothamBold
-        execBtn.TextSize = 15
-        execBtn.Parent = frame
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 6)
-        corner.Parent = execBtn
-
-        execBtn.MouseButton1Click:Connect(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/temujones1239012i3/11234123123/refs/heads/main/remote.lua"))()
+        -- Update GUI when players join
+        Players.PlayerAdded:Connect(function(player)
+            createPlayerButton(player)
         end)
 
-        self.cleanup = function()
-            if screenGui then screenGui:Destroy() end
-            self.active = false
-        end
+        -- Remove player frame when leaving
+        Players.PlayerRemoving:Connect(function(player)
+            for _, child in ipairs(Scrolling:GetChildren()) do
+                if child:IsA("Frame") then
+                    local label = child:FindFirstChildOfClass("TextLabel")
+                    if label and label.Text == player.Name then
+                        child:Destroy()
+                    end
+                end
+            end
+        end)
 
-        print("[Vster Hub] ✓ Admin Panel loaded under Misc")
+        self.gui = ScreenGui
+        print("[Vster Hub] ✓ Admin Panel loaded & visible on startup")
     end,
 
     cleanup = function(self)
-        if self.active then
-            self.active = false
+        if self.gui then
+            self.gui:Destroy()
+            self.gui = nil
         end
+        self.active = false
+        self.initialized = false
     end
 }
-
 
 -- =======================
 -- GUI CREATION
